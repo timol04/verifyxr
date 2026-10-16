@@ -25,6 +25,15 @@ auch unter einem Repo-Unterpfad.
 
 Vor dem Livegang in `src/config.js` den Lemon-Squeezy-Checkout-Link (`UPGRADE_URL`) eintragen.
 
+## Premium ein- und ausschalten
+
+In `src/config.js` steuert `PREMIUM_ENABLED` das Premium-Angebot. Bei `false` (Standard) sind
+Premium-Bereich, Schlüsselfeld, Upgrade-Button und Schloss-Symbole nicht sichtbar und alle
+Premium-Funktionen gesperrt. Der Code bleibt vollständig erhalten. Zum Livegang auf `true` setzen.
+
+Zum Testen ohne den Schalter umzulegen: Seite mit `?premium-test=1` öffnen. Das schaltet Premium
+nur in diesem Browser sichtbar (localStorage). Mit `?premium-test=0` wird es wieder ausgeschaltet.
+
 ## Lizenzschlüssel (Premium)
 
 Premium wird lokal freigeschaltet: Der Schlüssel (`FMCK-XXXX-XXXX-XXXX`) besteht aus 8 zufälligen
@@ -61,6 +70,7 @@ leichte Hürde. Wer den SALT ändert, macht alle bisher erzeugten Schlüssel ung
 - **Profile:** werden im Browser gespeichert (pro Gerät und Browser, nicht synchronisiert).
 - **PDF-Export:** öffnet den Druckdialog, dort «Als PDF speichern» wählen. Gedruckt wird nur der Bericht.
 - **Batch:** mehrere .docx auswählen, Übersicht plus Einzelberichte.
+- **Sicherung:** Lizenz und Profile lassen sich als JSON-Datei herunterladen und wiederherstellen (bei gelöschten Website-Daten, Privatmodus, Gerätewechsel). Beim Import wird der Schlüssel neu geprüft.
 
 ## Bekannte Grenzen
 

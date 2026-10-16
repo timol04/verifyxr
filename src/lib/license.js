@@ -1,6 +1,8 @@
 // Lokale Lizenzprüfung (kein Server). Format: FMCK-XXXX-XXXX-XXXX
 //   - 8 Zeichen Nutzlast (zufällig) + 4 Zeichen Prüfsumme über Nutzlast und SALT
 //   - gültig = Format stimmt und Prüfsumme passt
+import { premiumAvailable } from '../config.js';
+
 // Bewusst keine echte Piraterie-Sicherung: SALT und Algorithmus stehen im ausgelieferten
 // JavaScript. Das ist eine leichte Hürde, kein Kopierschutz.
 
@@ -45,7 +47,8 @@ export function validateKey(input) {
 export function getStoredKey() {
   try { return validateKey(localStorage.getItem(STORAGE_KEY)); } catch { return null; }
 }
-export const isPremium = () => getStoredKey() !== null;
+// Premium gilt nur, wenn es angeboten wird (Schalter in config.js) und ein gültiger Schlüssel gespeichert ist.
+export const isPremium = () => premiumAvailable() && getStoredKey() !== null;
 
 /** Prüft und speichert den Schlüssel. true bei Erfolg. */
 export function activate(input) {

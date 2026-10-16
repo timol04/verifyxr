@@ -60,9 +60,9 @@ export const lockedBlock = (title, text) => `<div class="locked-block"><h3>${LOC
 /**
  * Ein vollständiger Bericht für eine Datei.
  * @param entry { name, doc, result, apa|null, error? }
- * @param opts  { premium: boolean }
+ * @param opts  { premium: Premium aktiv, locks: gesperrte Premium-Vorschau anzeigen }
  */
-export function reportHtml(entry, { premium }) {
+export function reportHtml(entry, { premium, locks }) {
   if (entry.error) return `<div class="report-head error" role="alert"><h3>${esc(entry.name)}: Datei konnte nicht gelesen werden</h3><p>${esc(entry.error)}</p></div>`;
   const { doc, result, apa } = entry;
   const all = apa ? [...result.criteria, ...apa] : result.criteria;
@@ -83,9 +83,8 @@ export function reportHtml(entry, { premium }) {
     </div>
     <h3 class="cat">Format und Layout</h3>
     <ul class="protocol">${result.criteria.map(criterionHtml).join('')}</ul>
-    <h3 class="cat">Quellen und Zitate (APA 7)</h3>
-    ${premium && apa ? `<ul class="protocol">${apa.map(criterionHtml).join('')}</ul>`
-      : lockedBlock('APA-7-Zitierkonsistenz', 'Gleicht Zitationen im Text mit dem Literaturverzeichnis ab und prüft DOI, Kursivschrift und Titel-Schreibweise.')}`;
+    ${premium && apa ? `<h3 class="cat">Quellen und Zitate (APA 7)</h3><ul class="protocol">${apa.map(criterionHtml).join('')}</ul>`
+      : locks ? `<h3 class="cat">Quellen und Zitate (APA 7)</h3>${lockedBlock('APA-7-Zitierkonsistenz', 'Gleicht Zitationen im Text mit dem Literaturverzeichnis ab und prüft DOI, Kursivschrift und Titel-Schreibweise.')}` : ''}`;
 }
 
 /** Mehrere Dateien: Übersichtstabelle plus aufklappbare Einzelberichte. */

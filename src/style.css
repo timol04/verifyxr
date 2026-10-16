@@ -180,3 +180,14 @@ a.primary.link { display: inline-block; width: auto; margin: 0; text-decoration:
   .item, .findings li, .tile { break-inside: avoid; }
   .batch-file { background: none; padding: 0; }
 }
+
+/* ---------- Sicherung ---------- */
+.backup { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.backup .hint { margin: 0 0 12px; }
+.backup-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.file-btn { position: relative; display: inline-block; }
+.file-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.file-btn:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
+.premium[hidden] { display: none; }
+.test-note { margin: 0 0 16px; padding: 8px 12px; border-radius: 8px; background: color-mix(in srgb, var(--warn) 16%, transparent); font-size: .9rem; }
+.test-note a { color: var(--accent); font-weight: 600; }

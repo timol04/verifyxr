@@ -7,10 +7,12 @@ import { checkApa } from './lib/apa.js';
 import { PRESETS, DEFAULT_PRESET } from './lib/presets.js';
 import { isPremium, activate, deactivate, getStoredKey } from './lib/license.js';
 import { listProfiles, saveProfile, deleteProfile, getProfile } from './lib/profiles.js';
-import { UPGRADE_URL, PRICE_LABEL } from './config.js';
+import { createBackup, backupFileName, parseBackup } from './lib/backup.js';
+import { UPGRADE_URL, PRICE_LABEL, PREMIUM_ENABLED, premiumAvailable, isPremiumTestMode, applyPremiumTestParam } from './config.js';
 import { esc, reportHtml, batchHtml, lockedBlock, LOCK_ICON } from './ui/report.js';
 
 const $ = (sel) => document.querySelector(sel);
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const RULES_KEY = 'formacheck:rules';
 
 // ---------- Formular <-> Rules ----------
@@ -67,6 +69,7 @@ function renderPresetOptions(selected) {
 /** Profile speichern/löschen: Premium. Für Gratis-Nutzer eine gesperrte Zeile. */
 function renderProfileTools() {
   const el = $('#profiles');
+  if (!premiumAvailable()) { el.innerHTML = ''; return; }
   if (!isPremium()) {
     el.innerHTML = `<a class="locked-row" href="#premium" data-goto-premium>${LOCK_ICON}<span>Eigene Profile speichern, z.B. «Uni Basel Bachelorarbeit»</span><span class="pill">Premium</span></a>`;
     return;
@@ -83,17 +86,34 @@ function renderProfileTools() {
 // ---------- Premium-Bereich ----------
 const FEATURES = ['APA-7-Zitierkonsistenz mit Abgleich zum Literaturverzeichnis', 'Eigene Format-Profile speichern', 'Prüfbericht als PDF speichern', 'Mehrere Dateien auf einmal prüfen'];
 
+/** Sicherung: Export nur mit Premium, Import immer (um Lizenz und Profile wiederherzustellen). */
+function backupHtml(premium) {
+  return `<div class="backup">
+    <p class="hint"><strong>Deine Daten liegen nur in diesem Browser.</strong> Lizenz und Profile gehen verloren, wenn du Website-Daten löschst, den privaten Modus nutzt oder das Gerät wechselst. ${premium ? 'Sichere sie als Datei und stelle sie bei Bedarf wieder her.' : 'Schon gekauft? Stelle deine Daten aus einer Sicherung wieder her.'}</p>
+    <div class="backup-actions">
+      ${premium ? '<button id="exportBackup" class="secondary" type="button">Sicherung herunterladen</button>' : ''}
+      <label class="secondary file-btn">Sicherung wiederherstellen<input id="importBackup" type="file" accept=".json,application/json" /></label>
+    </div>
+    <p id="backupMsg" class="license-msg" role="status"></p>
+  </div>`;
+}
+
 function renderPremium(message = '') {
   const el = $('#premium');
+  // Premium ist abgeschaltet (config.js): Bereich komplett ausblenden.
+  el.hidden = !premiumAvailable();
+  if (el.hidden) { el.innerHTML = ''; return; }
+  const testNote = isPremiumTestMode() && !PREMIUM_ENABLED ? '<p class="test-note">Testmodus: Premium ist nur in diesem Browser sichtbar. <a href="?premium-test=0">Testmodus beenden</a></p>' : '';
   if (isPremium()) {
     const key = getStoredKey();
-    el.innerHTML = `<div class="premium-active">
+    el.innerHTML = `${testNote}<div class="premium-active">
       <svg viewBox="0 0 28 28" width="28" height="28" aria-hidden="true"><circle cx="14" cy="14" r="12" fill="currentColor"/><path d="M8.5 14.5l4 4 7-8" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <div><h2 id="h-premium">Premium ist aktiv</h2><p>Lizenz ${esc(key.slice(0, 9))}…${esc(key.slice(-4))} auf diesem Gerät gespeichert.</p></div>
-      <button id="removeLicense" class="secondary" type="button">Lizenz entfernen</button></div>`;
+      <button id="removeLicense" class="secondary" type="button">Lizenz entfernen</button></div>
+      ${backupHtml(true)}`;
     return;
   }
-  el.innerHTML = `<h2 id="h-premium">FormaCheck Premium <span class="pill">${esc(PRICE_LABEL)}</span></h2>
+  el.innerHTML = `${testNote}<h2 id="h-premium">FormaCheck Premium <span class="pill">${esc(PRICE_LABEL)}</span></h2>
     <ul class="features">${FEATURES.map((f) => `<li>${LOCK_ICON}<span>${esc(f)}</span></li>`).join('')}</ul>
     <div class="premium-actions">
       <a class="primary link" href="${esc(UPGRADE_URL)}" target="_blank" rel="noopener">Premium kaufen</a>
@@ -103,7 +123,8 @@ function renderPremium(message = '') {
       </form>
     </div>
     <p id="licenseMsg" class="license-msg" role="status">${esc(message)}</p>
-    <p class="hint">Die Prüfung des Schlüssels läuft lokal im Browser. Es wird nichts übertragen.</p>`;
+    <p class="hint">Die Prüfung des Schlüssels läuft lokal im Browser. Es wird nichts übertragen.</p>
+    ${backupHtml(false)}`;
 }
 
 /** Nach Aktivierung/Deaktivierung alles neu aufbauen, was vom Premium-Status abhängt. */
@@ -145,7 +166,8 @@ function render() {
   if (entries.length === 0) return;
   const checked = entries.map(checkEntry);
   const premium = isPremium();
-  $('#result').innerHTML = checked.length === 1 ? reportHtml(checked[0], { premium }) : batchHtml(checked, { premium });
+  const opts = { premium, locks: premiumAvailable() };
+  $('#result').innerHTML = checked.length === 1 ? reportHtml(checked[0], opts) : batchHtml(checked, opts);
   $('#result').hidden = false;
   $('#placeholder').hidden = true;
   $('#step3').classList.add('done');
@@ -156,7 +178,7 @@ function render() {
 /** PDF-Export (Premium): nutzt den Druckdialog des Browsers, Ziel «Als PDF speichern». */
 function renderActions(hasResult) {
   const el = $('#reportActions');
-  el.hidden = !hasResult;
+  el.hidden = !hasResult || !premiumAvailable();
   el.innerHTML = isPremium()
     ? '<button id="exportPdf" class="secondary" type="button">Als PDF speichern</button><span class="hint">Im Druckdialog «Als PDF speichern» wählen.</span>'
     : `<a class="locked-row" href="#premium" data-goto-premium>${LOCK_ICON}<span>Prüfbericht als PDF speichern</span><span class="pill">Premium</span></a>`;
@@ -167,7 +189,7 @@ let selectedFiles = []; // letzte Auswahl, damit nach dem Freischalten alle Date
 
 function updateFileNotice() {
   const notice = $('#fileNotice');
-  const show = ignoredFiles > 0 && !isPremium();
+  const show = ignoredFiles > 0 && premiumAvailable() && !isPremium();
   notice.hidden = !show;
   notice.innerHTML = show ? `${LOCK_ICON}<span>Mehrere Dateien gleichzeitig prüfen ist Premium. Geprüft wird nur «${esc(entries[0].name)}».</span> <a href="#premium" data-goto-premium>Premium ansehen</a>` : '';
 }
@@ -178,7 +200,7 @@ async function handleFiles(fileList) {
   selectedFiles = all;
   // Gratis: nur eine Datei, die übrigen werden mit Hinweis ignoriert.
   const files = isPremium() ? all : all.slice(0, 1);
-  ignoredFiles = all.length - files.length;
+  ignoredFiles = premiumAvailable() ? all.length - files.length : 0; // ohne Premium-Angebot still nur die erste Datei
   entries = await Promise.all(files.map(parseEntry));
   $('#fileName').textContent = entries.length === 1 ? entries[0].name : `${entries.length} Dateien ausgewählt`;
   $('#run').disabled = false;
@@ -189,6 +211,8 @@ async function handleFiles(fileList) {
 
 // ---------- Start ----------
 function init() {
+  applyPremiumTestParam();
+  $('#file').multiple = premiumAvailable();
   const select = $('#preset');
   const saved = loadRules();
   if (saved) { writeRules(saved); renderPresetOptions('custom'); } else { writeRules({ ...PRESETS[DEFAULT_PRESET].rules, ignoreSpecial: true }); renderPresetOptions(DEFAULT_PRESET); }
@@ -234,6 +258,34 @@ function init() {
     else renderPremium('Der Schlüssel ist ungültig. Prüfe ihn auf Tippfehler (Format FMCK-XXXX-XXXX-XXXX) oder ob der Browser das Speichern erlaubt.');
   });
   $('#premium').addEventListener('click', (e) => { if (e.target.id === 'removeLicense') { deactivate(); refreshPremiumUi(); } });
+
+  // Sicherung herunterladen / wiederherstellen
+  $('#premium').addEventListener('click', (e) => {
+    if (e.target.id !== 'exportBackup') return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(createBackup(), null, 2)], { type: 'application/json' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: backupFileName() });
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+  $('#premium').addEventListener('change', async (e) => {
+    if (e.target.id !== 'importBackup') return;
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const { license, profiles, skipped } = parseBackup(await file.text());
+      if (license) activate(license);
+      let saved = 0;
+      for (const p of profiles) if (saveProfile(p.name, p.rules)) saved++;
+      refreshPremiumUi();
+      const parts = [license ? 'Lizenz' : null, saved ? plural(saved, 'Profil', 'Profile') : null].filter(Boolean);
+      $('#backupMsg').style.color = 'var(--ok)';
+      $('#backupMsg').textContent = `${parts.length ? `Wiederhergestellt: ${parts.join(' und ')}.` : 'Die Sicherung enthielt keine nutzbaren Daten.'}${skipped ? ` ${plural(skipped, 'Eintrag', 'Einträge')} übersprungen (ungültig).` : ''}`;
+    } catch (err) {
+      $('#backupMsg').style.color = 'var(--fail)';
+      $('#backupMsg').textContent = err.message;
+    }
+  });
 
   // Sprung zum Premium-Bereich aus gesperrten Stellen
   document.addEventListener('click', (e) => {
