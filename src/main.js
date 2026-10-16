@@ -5,8 +5,15 @@ import { checkDocument } from './lib/checker.js';
 import { PRESETS, DEFAULT_PRESET } from './lib/presets.js';
 
 const $ = (sel) => document.querySelector(sel);
-const ICON = { ok: '✅', warn: '⚠️', fail: '⛔', skip: '➖' };
-const LABEL = { ok: 'grün', warn: 'gelb', fail: 'rot', skip: 'nicht geprüft' };
+const LABEL = { ok: 'Erfüllt', warn: 'Kleine Abweichung', fail: 'Abweichung', skip: 'Nicht geprüft' };
+// Statussymbole als SVG (kein Emoji), Farbe kommt aus CSS (currentColor)
+const GLYPH = {
+  ok: '<circle cx="14" cy="14" r="12" fill="currentColor"/><path d="M8.5 14.5l4 4 7-8" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>',
+  warn: '<path d="M14 2.5l12.5 22h-25z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14 11v6.5M14 21v.1" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>',
+  fail: '<circle cx="14" cy="14" r="12" fill="currentColor"/><path d="M9.5 9.5l9 9m0-9l-9 9" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>',
+  skip: '<circle cx="14" cy="14" r="11" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 14h10" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
+};
+const glyph = (status) => `<svg class="mark" viewBox="0 0 28 28" aria-hidden="true">${GLYPH[status]}</svg>`;
 const MAX_FINDINGS = 25; // Liste pro Kriterium kürzen, damit lange Arbeiten lesbar bleiben
 const STORAGE_KEY = 'abgabe-checker:rules';
 
@@ -46,31 +53,33 @@ const loadRules = () => { try { return JSON.parse(localStorage.getItem(STORAGE_K
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 function renderResult(fileName, doc, result) {
-  const { criteria, passed, total, status } = result;
-  const cards = criteria.map((c) => {
+  const { criteria, passed, total } = result;
+  const items = criteria.map((c) => {
     const shown = c.findings.slice(0, MAX_FINDINGS);
     const more = c.findings.length - shown.length;
     const list = shown.length
-      ? `<ul class="findings">${shown.map((f) => `<li><strong>${esc(f.where)}:</strong> ${esc(f.message)}</li>`).join('')}${more > 0 ? `<li class="more">… und ${more} weitere</li>` : ''}</ul>`
+      ? `<details${shown.length <= 4 ? ' open' : ''}><summary>${c.findings.length} Fundstelle${c.findings.length === 1 ? '' : 'n'}</summary>
+         <ul class="findings">${shown.map((f) => `<li><strong>${esc(f.where)}:</strong> ${esc(f.message)}</li>`).join('')}${more > 0 ? `<li class="more">… und ${more} weitere</li>` : ''}</ul></details>`
       : '';
-    return `<article class="card ${c.status}">
-      <h3><span class="dot" role="img" aria-label="${LABEL[c.status]}">${ICON[c.status]}</span> ${esc(c.label)}</h3>
-      <p>${esc(c.summary)}</p>${list}</article>`;
+    return `<li class="item ${c.status}">${glyph(c.status)}
+      <h3>${esc(c.label)}<span class="status">${LABEL[c.status]}</span></h3>
+      <p>${esc(c.summary)}</p>${list}</li>`;
   }).join('');
 
+  const checked = criteria.filter((c) => c.status !== 'skip');
   $('#result').innerHTML = `
-    <section class="summary ${status}" aria-live="polite">
-      <div class="light" aria-hidden="true"></div>
-      <div><h2>${passed} von ${total} Kriterien erfüllt</h2>
-      <p>${esc(fileName)} · ${doc.wordCount} Wörter · ${doc.pages} Seiten${doc.pagesSource === 'explicit' ? ' (geschätzt)' : ''}</p></div>
+    <section class="summary" aria-live="polite">
+      <h2>${passed} von ${total} Kriterien erfüllt</h2>
+      <p>${esc(fileName)} · ${doc.wordCount} Wörter · ${doc.pages} Seiten${doc.pagesSource === 'explicit' ? ' (geschätzt)' : ''}</p>
+      <ul class="meter" aria-hidden="true">${checked.map((c) => `<li class="${c.status}"></li>`).join('')}</ul>
     </section>
-    <div class="cards">${cards}</div>`;
+    <ul class="protocol">${items}</ul>`;
   $('#result').hidden = false;
   $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function showError(message) {
-  $('#result').innerHTML = `<section class="summary fail"><div class="light" aria-hidden="true"></div><div><h2>Datei konnte nicht gelesen werden</h2><p>${esc(message)}</p></div></section>`;
+  $('#result').innerHTML = `<section class="summary error" role="alert"><h2>Datei konnte nicht gelesen werden</h2><p>${esc(message)}</p></section>`;
   $('#result').hidden = false;
 }
 

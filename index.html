@@ -4,58 +4,104 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Abgabe-Checker – Format-Check für Seminar- und Abschlussarbeiten</title>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ctext y=%2726%27 font-size=%2726%27%3E%E2%9C%85%3C/text%3E%3C/svg%3E" />
     <meta name="description" content="Prüfe dein Word-Dokument vor der Abgabe auf Schrift, Zeilenabstand, Ränder und Umfang. Alles läuft lokal in deinem Browser." />
+    <meta name="theme-color" content="#0F1B33" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   </head>
   <body>
+    <header class="top">
+      <a class="brand" href="./">
+        <img src="/favicon.svg" alt="" width="28" height="28" />
+        <span>Abgabe-Checker</span>
+      </a>
+    </header>
+
     <main>
-      <header class="hero">
-        <h1>Abgabe-Checker</h1>
-        <p class="lead">Prüfe deine Arbeit vor der Abgabe auf Schrift, Zeilenabstand, Seitenränder und Umfang.</p>
-        <p class="privacy">🔒 Deine Datei verlässt nie deinen Browser — es gibt keine Server-Uploads.</p>
-      </header>
-
-      <form id="rules" class="panel" autocomplete="off">
-        <h2>1. Vorgaben</h2>
-        <label class="wide">Preset <select id="preset"></select></label>
-        <div class="grid">
-          <label>Schriftart <input id="font" type="text" /></label>
-          <label>Schriftgrösse (pt) <input id="size" type="number" step="0.5" min="1" /></label>
-          <label>Zeilenabstand (×) <input id="lineSpacing" type="number" step="0.05" min="0.5" /></label>
+      <section class="hero">
+        <div class="hero-text">
+          <h1>Stimmt dein Dokument mit den Vorgaben überein?</h1>
+          <p class="lead">Lade deine Arbeit als .docx hoch. Der Abgabe-Checker prüft Schrift, Zeilenabstand, Seitenränder und Umfang und zeigt dir, wo etwas abweicht.</p>
+          <p class="privacy">
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2" fill="currentColor"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span>Deine Datei verlässt nie deinen Browser — es gibt keine Server-Uploads.</span>
+          </p>
         </div>
-        <fieldset>
-          <legend>Seitenränder (cm)</legend>
-          <div class="grid four">
-            <label>Oben <input id="mTop" type="number" step="0.1" min="0" /></label>
-            <label>Unten <input id="mBottom" type="number" step="0.1" min="0" /></label>
-            <label>Links <input id="mLeft" type="number" step="0.1" min="0" /></label>
-            <label>Rechts <input id="mRight" type="number" step="0.1" min="0" /></label>
-          </div>
-        </fieldset>
-        <fieldset>
-          <legend>Umfang (leer = keine Grenze)</legend>
-          <div class="grid four">
-            <label>Wörter min. <input id="minWords" type="number" min="0" /></label>
-            <label>Wörter max. <input id="maxWords" type="number" min="0" /></label>
-            <label>Seiten min. <input id="minPages" type="number" min="0" /></label>
-            <label>Seiten max. <input id="maxPages" type="number" min="0" /></label>
-          </div>
-        </fieldset>
-        <label class="check"><input id="ignoreSpecial" type="checkbox" checked /> Überschriften, Verzeichnisse und Beschriftungen nicht prüfen</label>
-      </form>
 
-      <section class="panel">
-        <h2>2. Dokument prüfen</h2>
-        <label id="drop" class="drop">
-          <input id="file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
-          <strong>.docx-Datei hierher ziehen</strong> oder klicken zum Auswählen
-          <span id="fileName" class="fileName"></span>
-        </label>
-        <p class="hint">Ändere Vorgaben nach dem Upload, um sofort neu zu prüfen.</p>
+        <!-- Schematische A4-Seite mit Randführung: zeigt, was geprüft wird -->
+        <svg class="sheet" viewBox="0 0 260 330" role="img" aria-label="Schematische Seite mit eingezeichneten Seitenrändern">
+          <g class="ruler" stroke="currentColor" stroke-width="1">
+            <path d="M34 14H234M34 10v8M84 12v4M134 12v4M184 12v4M234 10v8" />
+            <path d="M14 34V314M10 34h8M12 84h4M12 134h4M12 184h4M12 234h4M10 314h8" />
+          </g>
+          <rect x="34" y="34" width="200" height="280" fill="var(--surface)" stroke="var(--line)" />
+          <rect class="guide" x="64" y="64" width="140" height="220" fill="none" pathLength="100" />
+          <g fill="var(--line)">
+            <rect x="64" y="64" width="90" height="9" rx="2" fill="var(--ink)" opacity=".85"/>
+            <rect x="64" y="90" width="140" height="5" rx="2.5"/><rect x="64" y="104" width="140" height="5" rx="2.5"/>
+            <rect x="64" y="118" width="126" height="5" rx="2.5"/><rect x="64" y="132" width="140" height="5" rx="2.5"/>
+            <rect x="64" y="146" width="104" height="5" rx="2.5"/>
+            <rect x="64" y="172" width="140" height="5" rx="2.5"/><rect x="64" y="186" width="140" height="5" rx="2.5"/>
+            <rect x="64" y="200" width="118" height="5" rx="2.5"/><rect x="64" y="214" width="140" height="5" rx="2.5"/>
+            <rect x="64" y="228" width="90" height="5" rx="2.5"/>
+          </g>
+          <!-- abweichende Zeile: wie mit Korrekturstift angestrichen -->
+          <path class="pen" d="M60 197.5c30-3 60 2 124 -1.5" fill="none" stroke="var(--fail)" stroke-width="2" stroke-linecap="round" pathLength="100"/>
+          <g class="tag" transform="translate(190 160)">
+            <rect width="62" height="22" rx="4" fill="var(--ink)"/>
+            <text x="31" y="15" text-anchor="middle" font-size="11" fill="#fff" font-family="inherit">1,0 statt 1,5</text>
+          </g>
+          <g class="tag" transform="translate(42 296)">
+            <text font-size="10" fill="var(--accent)" font-family="inherit">2,5 cm</text>
+          </g>
+        </svg>
       </section>
+
+      <div class="workbench">
+        <section class="block" aria-labelledby="h-upload">
+          <h2 id="h-upload">Dokument prüfen</h2>
+          <label id="drop" class="drop">
+            <input id="file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+            <svg viewBox="0 0 24 24" width="36" height="36" aria-hidden="true"><path d="M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 3v5h5M12 17v-6m-2.5 2.5L12 11l2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <strong>.docx-Datei hierher ziehen</strong>
+            <span>oder klicken, um sie auszuwählen</span>
+            <span id="fileName" class="fileName"></span>
+          </label>
+          <p class="hint">Wenn du die Vorgaben änderst, wird dasselbe Dokument sofort neu geprüft.</p>
+        </section>
+
+        <form id="rules" class="block" autocomplete="off" aria-labelledby="h-rules">
+          <h2 id="h-rules">Vorgaben</h2>
+          <label class="field">Vorlage <select id="preset"></select></label>
+          <div class="row3">
+            <label class="field">Schriftart <input id="font" type="text" /></label>
+            <label class="field">Schriftgrösse (pt) <input id="size" type="number" step="0.5" min="1" /></label>
+            <label class="field">Zeilenabstand (×) <input id="lineSpacing" type="number" step="0.05" min="0.5" /></label>
+          </div>
+          <fieldset>
+            <legend>Seitenränder (cm)</legend>
+            <div class="row4">
+              <label class="field">Oben <input id="mTop" type="number" step="0.1" min="0" /></label>
+              <label class="field">Unten <input id="mBottom" type="number" step="0.1" min="0" /></label>
+              <label class="field">Links <input id="mLeft" type="number" step="0.1" min="0" /></label>
+              <label class="field">Rechts <input id="mRight" type="number" step="0.1" min="0" /></label>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Umfang (leer = keine Grenze)</legend>
+            <div class="row4">
+              <label class="field">Wörter min. <input id="minWords" type="number" min="0" /></label>
+              <label class="field">Wörter max. <input id="maxWords" type="number" min="0" /></label>
+              <label class="field">Seiten min. <input id="minPages" type="number" min="0" /></label>
+              <label class="field">Seiten max. <input id="maxPages" type="number" min="0" /></label>
+            </div>
+          </fieldset>
+          <label class="check"><input id="ignoreSpecial" type="checkbox" checked /> Überschriften, Verzeichnisse und Beschriftungen nicht prüfen</label>
+        </form>
+      </div>
 
       <div id="result" hidden></div>
     </main>
+    <footer class="foot"><p>Die Prüfung liest nur die Formatierung in der .docx-Datei. Seitenzahlen sind eine Näherung, wenn Word sie nicht gespeichert hat.</p></footer>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
