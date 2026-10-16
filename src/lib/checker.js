@@ -34,8 +34,11 @@ export function checkDocument(doc, rules) {
   ];
   const checked = criteria.filter((c) => c.status !== 'skip');
   const passed = checked.filter((c) => c.status === 'ok').length;
+  const findings = criteria.flatMap((c) => c.findings);
   return {
     criteria,
+    counts: { ok: passed, warn: checked.filter((c) => c.status === 'warn').length, fail: checked.filter((c) => c.status === 'fail').length },
+    findingCount: { error: findings.filter((f) => f.severity === 'error').length, hint: findings.filter((f) => f.severity === 'hint').length },
     passed,
     total: checked.length,
     // Gesamtampel: rot, sobald ein Kriterium rot ist; gelb bei mind. einem gelben.
@@ -52,8 +55,8 @@ const bodyParagraphs = (doc, rules) =>
   doc.paragraphs.filter((p) => p.words > 0 && !p.inTable && !(rules.ignoreSpecial && p.special));
 
 /**
- * Generischer Run-/Absatz-Check. `probe(item, para)` liefert eine Abweichungsbeschreibung
- * (String) oder null. Findings werden je Absatz zusammengefasst.
+ * Generischer Run-/Absatz-Check. `probe(item, para)` liefert eine Abweichung
+ * { message, expected, found, hint, severity? } oder null. Findings werden je Absatz zusammengefasst.
  */
 function checkByRuns({ id, label, okText, doc, rules, probe, perParagraph = false }) {
   const paras = bodyParagraphs(doc, rules);
@@ -63,20 +66,21 @@ function checkByRuns({ id, label, okText, doc, rules, probe, perParagraph = fals
   let badWords = 0;
   const findings = [];
   for (const p of paras) {
-    const problems = new Map(); // Beschreibung -> Wörter
+    const problems = new Map(); // message -> { d, words }
+    const add = (d, w) => problems.set(d.message, { d, words: (problems.get(d.message)?.words ?? 0) + w });
     if (perParagraph) {
       const d = probe(null, p);
-      if (d) problems.set(d, p.words);
+      if (d) add(d, p.words);
     } else {
       for (const item of p.items) {
         if (item.text === undefined || !item.text.trim()) continue;
         const d = probe(item, p);
-        if (d) problems.set(d, (problems.get(d) ?? 0) + countWords(item.text));
+        if (d) add(d, countWords(item.text));
       }
     }
-    for (const [message, w] of problems) {
-      badWords += w;
-      findings.push({ where: where(p), message, words: w });
+    for (const { d, words } of problems.values()) {
+      badWords += words;
+      findings.push({ severity: 'error', ...d, where: where(p), words });
     }
   }
   const share = badWords / total;
@@ -91,7 +95,11 @@ function checkFont(doc, rules) {
   return checkByRuns({
     id: 'font', label: 'Schriftart', doc, rules,
     okText: `Durchgehend ${rules.font}.`,
-    probe: (item) => (sameFont(item.font, rules.font) ? null : `Schriftart ist ${item.font ?? 'unbekannt'} statt ${rules.font}`),
+    probe: (item) => (sameFont(item.font, rules.font) ? null : {
+      message: `Schriftart ist ${item.font ?? 'unbekannt'} statt ${rules.font}`,
+      expected: rules.font, found: item.font ?? 'unbekannt',
+      hint: `Text markieren und in Word unter Start die Schriftart auf ${rules.font} stellen. Dauerhaft geht es über den Stil «Standard» (Rechtsklick → Ändern).`,
+    }),
   });
 }
 
@@ -101,23 +109,35 @@ function checkSize(doc, rules) {
     okText: `Durchgehend ${fmt(rules.size)} pt.`,
     probe: (item) => (item.size !== undefined && Math.abs(item.size - rules.size) <= TOLERANCE.size
       ? null
-      : `Schriftgrösse ist ${item.size === undefined ? 'unbekannt' : `${fmt(item.size)} pt`} statt ${fmt(rules.size)} pt`),
+      : {
+        message: `Schriftgrösse ist ${item.size === undefined ? 'unbekannt' : `${fmt(item.size)} pt`} statt ${fmt(rules.size)} pt`,
+        expected: `${fmt(rules.size)} pt`, found: item.size === undefined ? 'unbekannt' : `${fmt(item.size)} pt`,
+        hint: `Text markieren und unter Start die Schriftgrösse auf ${fmt(rules.size)} setzen.`,
+      }),
   });
 }
 
 function checkSpacing(doc, rules) {
+  const spacingHint = `Absatz markieren, unter Start → Absatz → Zeilenabstand den Wert «${fmt(rules.lineSpacing)}» wählen.`;
   return checkByRuns({
     id: 'spacing', label: 'Zeilenabstand', doc, rules, perParagraph: true,
     okText: `Durchgehend ${fmt(rules.lineSpacing)}-fach.`,
     probe: (_, p) => {
       const ls = p.lineSpacing;
       if (ls.kind === 'multiple') {
-        return Math.abs(ls.value - rules.lineSpacing) <= TOLERANCE.spacing
-          ? null
-          : `Zeilenabstand ist ${fmt(ls.value)} statt ${fmt(rules.lineSpacing)}`;
+        return Math.abs(ls.value - rules.lineSpacing) <= TOLERANCE.spacing ? null : {
+          message: `Zeilenabstand ist ${fmt(ls.value)} statt ${fmt(rules.lineSpacing)}`,
+          expected: `${fmt(rules.lineSpacing)}-fach`, found: `${fmt(ls.value)}-fach`, hint: spacingHint,
+        };
       }
-      // Fester Abstand (genau/mindestens) in pt lässt sich nicht verlässlich in ein Vielfaches umrechnen.
-      return `Zeilenabstand ist fest auf ${fmt(ls.value)} pt (${ls.kind === 'exact' ? 'genau' : 'mindestens'}) statt ${fmt(rules.lineSpacing)}-fach`;
+      // Fester Abstand (genau/mindestens) in pt lässt sich nicht verlässlich in ein Vielfaches umrechnen:
+      // deshalb nur ein Hinweis, kein sicherer Fehler.
+      return {
+        message: `Zeilenabstand ist fest auf ${fmt(ls.value)} pt (${ls.kind === 'exact' ? 'genau' : 'mindestens'}) statt ${fmt(rules.lineSpacing)}-fach`,
+        expected: `${fmt(rules.lineSpacing)}-fach`, found: `${fmt(ls.value)} pt (${ls.kind === 'exact' ? 'genau' : 'mindestens'})`,
+        severity: 'hint',
+        hint: `Ein fester Abstand lässt sich nicht sicher in «${fmt(rules.lineSpacing)}-fach» umrechnen. ${spacingHint}`,
+      };
     },
   });
 }
@@ -138,7 +158,12 @@ function checkMargins(doc, rules) {
       const diff = Math.abs(actual - expected);
       if (diff > TOLERANCE.marginCm) {
         worst = Math.max(worst, diff);
-        findings.push({ where: label, message: `Rand ${name} ist ${fmt(actual)} cm statt ${fmt(expected)} cm` });
+        findings.push({
+          where: label, severity: diff <= 0.5 ? 'hint' : 'error',
+          message: `Rand ${name} ist ${fmt(actual)} cm statt ${fmt(expected)} cm`,
+          expected: `${fmt(expected)} cm`, found: `${fmt(actual)} cm`,
+          hint: 'In Word unter Layout → Seitenränder → Benutzerdefinierte Seitenränder öffnen und den Wert anpassen; bei mehreren Abschnitten «Anwenden auf: Gesamtes Dokument» wählen.',
+        });
       }
     }
   });
@@ -161,7 +186,12 @@ function checkWordCount(doc, rules) {
   return {
     id: 'words', label: 'Wortzahl', status: bad ? 'fail' : 'ok',
     summary: bad ?? `${n} Wörter, innerhalb der Grenzen.`,
-    findings: bad ? [{ where: 'Dokument', message: bad }] : [],
+    findings: bad ? [{
+      where: 'Dokument', severity: 'error', message: bad,
+      expected: [minWords != null ? `mind. ${minWords}` : '', maxWords != null ? `höchstens ${maxWords}` : ''].filter(Boolean).join(', '),
+      found: `${n} Wörter`,
+      hint: n < (minWords ?? 0) ? 'Die Arbeit ist zu kurz: Inhalte ergänzen oder vertiefen.' : 'Die Arbeit ist zu lang: kürzen oder Inhalte straffen. Prüfe, ob Verzeichnisse oder Anhang mitgezählt werden dürfen.',
+    }] : [],
   };
 }
 
@@ -180,7 +210,12 @@ function checkPageCount(doc, rules) {
     id: 'pages', label: 'Seitenzahl',
     status: bad ? (reliable ? 'fail' : 'warn') : 'ok',
     summary: (bad ?? `${n} Seiten, innerhalb der Grenzen.`) + (bad || !reliable ? hint : ''),
-    findings: bad ? [{ where: 'Dokument', message: bad + hint }] : [],
+    findings: bad ? [{
+      where: 'Dokument', severity: reliable ? 'error' : 'hint', message: bad + hint,
+      expected: [minPages != null ? `mind. ${minPages}` : '', maxPages != null ? `höchstens ${maxPages}` : ''].filter(Boolean).join(', '),
+      found: `${n} Seiten${reliable ? '' : ' (geschätzt)'}`,
+      hint: 'Öffne das Dokument in Word, speichere es und prüfe es erneut: Word hinterlegt dabei die Seitenzahl in der Datei.',
+    }] : [],
   };
 }
 

@@ -52,35 +52,57 @@ const loadRules = () => { try { return JSON.parse(localStorage.getItem(STORAGE_K
 // ---------- Rendering ----------
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const SEVERITY = { error: 'Fehler', hint: 'Hinweis' };
+
 function renderResult(fileName, doc, result) {
-  const { criteria, passed, total } = result;
+  const { criteria, counts, findingCount } = result;
   const items = criteria.map((c) => {
     const shown = c.findings.slice(0, MAX_FINDINGS);
     const more = c.findings.length - shown.length;
+    const hint = c.findings.find((f) => f.hint)?.hint;
     const list = shown.length
-      ? `<details${shown.length <= 4 ? ' open' : ''}><summary>${c.findings.length} Fundstelle${c.findings.length === 1 ? '' : 'n'}</summary>
-         <ul class="findings">${shown.map((f) => `<li><strong>${esc(f.where)}:</strong> ${esc(f.message)}</li>`).join('')}${more > 0 ? `<li class="more">… und ${more} weitere</li>` : ''}</ul></details>`
+      ? `<details${shown.length <= 3 ? ' open' : ''}><summary>${plural(c.findings.length, 'Fundstelle', 'Fundstellen')}</summary>
+         <ul class="findings">${shown.map((f) => `<li class="sev-${f.severity}">
+           <span class="sev">${SEVERITY[f.severity]}</span> <strong>${esc(f.where)}</strong>
+           <span class="vals">Erwartet: ${esc(f.expected ?? '–')} · Gefunden: ${esc(f.found ?? '–')}</span></li>`).join('')}${more > 0 ? `<li class="more">… und ${more} weitere</li>` : ''}</ul>
+         ${hint ? `<p class="fix"><strong>So behebst du es:</strong> ${esc(hint)}</p>` : ''}</details>`
       : '';
     return `<li class="item ${c.status}">${glyph(c.status)}
       <h3>${esc(c.label)}<span class="status">${LABEL[c.status]}</span></h3>
       <p>${esc(c.summary)}</p>${list}</li>`;
   }).join('');
 
-  const checked = criteria.filter((c) => c.status !== 'skip');
+  const tile = (cls, n, label) => `<div class="tile ${cls}"><strong>${n}</strong><span>${label}</span></div>`;
   $('#result').innerHTML = `
-    <section class="summary" aria-live="polite">
-      <h2>${passed} von ${total} Kriterien erfüllt</h2>
-      <p>${esc(fileName)} · ${doc.wordCount} Wörter · ${doc.pages} Seiten${doc.pagesSource === 'explicit' ? ' (geschätzt)' : ''}</p>
-      <ul class="meter" aria-hidden="true">${checked.map((c) => `<li class="${c.status}"></li>`).join('')}</ul>
-    </section>
+    <div class="report-head" aria-live="polite">
+      <p class="file">${esc(fileName)} · ${doc.wordCount} Wörter · ${doc.pages} Seiten${doc.pagesSource === 'explicit' ? ' (geschätzt)' : ''}</p>
+      <div class="tiles">
+        ${tile('ok', counts.ok, 'Kriterien bestanden')}
+        ${tile('warn', counts.warn, 'Kriterien mit Hinweis')}
+        ${tile('fail', counts.fail, 'Kriterien mit Fehler')}
+      </div>
+      <p class="verdict">${counts.fail + counts.warn === 0 ? 'Alle geprüften Kriterien stimmen mit den Vorgaben überein.' : `${plural(findingCount.error, 'Fehler', 'Fehler')} und ${plural(findingCount.hint, 'Hinweis', 'Hinweise')} an einzelnen Stellen gefunden. Nicht jede Abweichung ist ein Fehler: Hinweise sind unsicher oder knapp.`}</p>
+    </div>
+    <h3 class="cat">Ergebnisse nach Kategorie</h3>
     <ul class="protocol">${items}</ul>`;
   $('#result').hidden = false;
-  $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  $('#placeholder').hidden = true;
+  $('#step3').classList.add('done');
 }
 
 function showError(message) {
-  $('#result').innerHTML = `<section class="summary error" role="alert"><h2>Datei konnte nicht gelesen werden</h2><p>${esc(message)}</p></section>`;
+  $('#result').innerHTML = `<div class="report-head error" role="alert"><h3>Datei konnte nicht gelesen werden</h3><p>${esc(message)}</p></div>`;
   $('#result').hidden = false;
+  $('#placeholder').hidden = true;
+}
+
+// Kurzfassung der Vorgaben unter dem Profil
+function updateSummary() {
+  const r = readRules();
+  const m = r.marginsCm;
+  const same = m.top === m.bottom && m.bottom === m.left && m.left === m.right;
+  $('#profileSummary').textContent = `${r.font} · ${r.size} pt · ${r.lineSpacing}-fach · Ränder ${same ? `${m.top} cm` : `${m.top}/${m.bottom}/${m.left}/${m.right} cm`}`;
 }
 
 // ---------- Ablauf ----------
@@ -104,7 +126,8 @@ function handleFile(file) {
   if (!/\.docx$/i.test(file.name)) { showError('Bitte eine .docx-Datei wählen.'); return; }
   lastFile = file;
   $('#fileName').textContent = file.name;
-  runCheck();
+  $('#run').disabled = false;
+  runCheck().then(() => $('#step3').scrollIntoView({ behavior: 'smooth', block: 'start' }));
 }
 
 function init() {
@@ -114,10 +137,12 @@ function init() {
   const saved = loadRules();
   if (saved) { writeRules(saved); select.value = 'custom'; } else { select.value = DEFAULT_PRESET; writeRules({ ...PRESETS[DEFAULT_PRESET].rules, ignoreSpecial: true }); }
 
+  updateSummary();
   select.addEventListener('change', () => {
-    if (PRESETS[select.value]) { writeRules({ ...PRESETS[select.value].rules, ignoreSpecial: $('#ignoreSpecial').checked }); saveRules(); runCheck(); }
+    if (PRESETS[select.value]) { writeRules({ ...PRESETS[select.value].rules, ignoreSpecial: $('#ignoreSpecial').checked }); saveRules(); updateSummary(); runCheck(); }
   });
-  $('#rules').addEventListener('input', () => { select.value = 'custom'; saveRules(); });
+  $('#rules').addEventListener('input', () => { select.value = 'custom'; saveRules(); updateSummary(); });
+  $('#run').addEventListener('click', () => { runCheck(); $('#step3').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   $('#rules').addEventListener('change', runCheck);
   $('#rules').addEventListener('submit', (e) => e.preventDefault());
 
