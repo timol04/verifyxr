@@ -1,6 +1,6 @@
-# Verifyxr
+# FormaCheck
 
-Abgabe-Checker für wissenschaftliche Arbeiten (client-seitig, .docx). Alles läuft lokal im Browser, es gibt kein Backend.
+FormaCheck: Format-Prüfung für wissenschaftliche Arbeiten (client-seitig, .docx). Alles läuft lokal im Browser, es gibt kein Backend.
 
 ## Entwicklung
 
