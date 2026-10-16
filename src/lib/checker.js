@@ -1,0 +1,189 @@
+// Check-Logik: vergleicht das Ergebnis von parseDocx() mit den Vorgaben des Nutzers.
+//
+// Jedes Kriterium liefert { id, label, status, summary, findings[] }.
+//   status: 'ok' (grün) | 'warn' (gelb) | 'fail' (rot) | 'skip' (nicht geprüft)
+// Findings sind nach Absatz gruppiert, damit die Liste lesbar bleibt.
+
+export const TOLERANCE = { size: 0.01, spacing: 0.05, marginCm: 0.1 };
+// Ab diesem Anteil abweichender Wörter wird aus Gelb Rot.
+const WARN_SHARE = 0.1;
+
+/**
+ * @param {Awaited<ReturnType<import('./docx-parser.js').parseDocx>>} doc
+ * @param {Rules} rules
+ *
+ * @typedef {Object} Rules
+ * @property {string} font            z.B. 'Times New Roman'
+ * @property {number} size            Punkt, z.B. 12
+ * @property {number} lineSpacing     Vielfaches, z.B. 1.5
+ * @property {{top:number,bottom:number,left:number,right:number}} marginsCm
+ * @property {number|null} minWords
+ * @property {number|null} maxWords
+ * @property {number|null} minPages
+ * @property {number|null} maxPages
+ * @property {boolean} ignoreSpecial  Überschriften/Verzeichnisse/Beschriftungen nicht prüfen
+ */
+export function checkDocument(doc, rules) {
+  const criteria = [
+    checkFont(doc, rules),
+    checkSize(doc, rules),
+    checkSpacing(doc, rules),
+    checkMargins(doc, rules),
+    checkWordCount(doc, rules),
+    checkPageCount(doc, rules),
+  ];
+  const checked = criteria.filter((c) => c.status !== 'skip');
+  const passed = checked.filter((c) => c.status === 'ok').length;
+  return {
+    criteria,
+    passed,
+    total: checked.length,
+    // Gesamtampel: rot, sobald ein Kriterium rot ist; gelb bei mind. einem gelben.
+    status: checked.some((c) => c.status === 'fail') ? 'fail' : checked.some((c) => c.status === 'warn') ? 'warn' : 'ok',
+  };
+}
+
+// ---------- Format-Kriterien (Schrift, Grösse, Zeilenabstand) ----------
+const sameFont = (a, b) => (a ?? '').trim().toLowerCase() === (b ?? '').trim().toLowerCase();
+const fmt = (n) => String(Math.round(n * 100) / 100).replace('.', ',');
+
+/** Absätze, die als Fliesstext geprüft werden (ohne Tabellen, optional ohne Sonderstile, ohne Leertext). */
+const bodyParagraphs = (doc, rules) =>
+  doc.paragraphs.filter((p) => p.words > 0 && !p.inTable && !(rules.ignoreSpecial && p.special));
+
+/**
+ * Generischer Run-/Absatz-Check. `probe(item, para)` liefert eine Abweichungsbeschreibung
+ * (String) oder null. Findings werden je Absatz zusammengefasst.
+ */
+function checkByRuns({ id, label, okText, doc, rules, probe, perParagraph = false }) {
+  const paras = bodyParagraphs(doc, rules);
+  const total = paras.reduce((s, p) => s + p.words, 0);
+  if (total === 0) return { id, label, status: 'skip', summary: 'Kein Fliesstext gefunden.', findings: [] };
+
+  let badWords = 0;
+  const findings = [];
+  for (const p of paras) {
+    const problems = new Map(); // Beschreibung -> Wörter
+    if (perParagraph) {
+      const d = probe(null, p);
+      if (d) problems.set(d, p.words);
+    } else {
+      for (const item of p.items) {
+        if (item.text === undefined || !item.text.trim()) continue;
+        const d = probe(item, p);
+        if (d) problems.set(d, (problems.get(d) ?? 0) + countWords(item.text));
+      }
+    }
+    for (const [message, w] of problems) {
+      badWords += w;
+      findings.push({ where: where(p), message, words: w });
+    }
+  }
+  const share = badWords / total;
+  const status = badWords === 0 ? 'ok' : share <= WARN_SHARE ? 'warn' : 'fail';
+  const summary = badWords === 0
+    ? okText
+    : `${findings.length} Abweichung${findings.length === 1 ? '' : 'en'} (${Math.round(share * 100)} % des Textes).`;
+  return { id, label, status, summary, findings };
+}
+
+function checkFont(doc, rules) {
+  return checkByRuns({
+    id: 'font', label: 'Schriftart', doc, rules,
+    okText: `Durchgehend ${rules.font}.`,
+    probe: (item) => (sameFont(item.font, rules.font) ? null : `Schriftart ist ${item.font ?? 'unbekannt'} statt ${rules.font}`),
+  });
+}
+
+function checkSize(doc, rules) {
+  return checkByRuns({
+    id: 'size', label: 'Schriftgrösse', doc, rules,
+    okText: `Durchgehend ${fmt(rules.size)} pt.`,
+    probe: (item) => (item.size !== undefined && Math.abs(item.size - rules.size) <= TOLERANCE.size
+      ? null
+      : `Schriftgrösse ist ${item.size === undefined ? 'unbekannt' : `${fmt(item.size)} pt`} statt ${fmt(rules.size)} pt`),
+  });
+}
+
+function checkSpacing(doc, rules) {
+  return checkByRuns({
+    id: 'spacing', label: 'Zeilenabstand', doc, rules, perParagraph: true,
+    okText: `Durchgehend ${fmt(rules.lineSpacing)}-fach.`,
+    probe: (_, p) => {
+      const ls = p.lineSpacing;
+      if (ls.kind === 'multiple') {
+        return Math.abs(ls.value - rules.lineSpacing) <= TOLERANCE.spacing
+          ? null
+          : `Zeilenabstand ist ${fmt(ls.value)} statt ${fmt(rules.lineSpacing)}`;
+      }
+      // Fester Abstand (genau/mindestens) in pt lässt sich nicht verlässlich in ein Vielfaches umrechnen.
+      return `Zeilenabstand ist fest auf ${fmt(ls.value)} pt (${ls.kind === 'exact' ? 'genau' : 'mindestens'}) statt ${fmt(rules.lineSpacing)}-fach`;
+    },
+  });
+}
+
+// ---------- Seitenränder ----------
+const SIDES = [['top', 'oben'], ['bottom', 'unten'], ['left', 'links'], ['right', 'rechts']];
+
+function checkMargins(doc, rules) {
+  const findings = [];
+  let worst = 0;
+  doc.sections.forEach((sec, i) => {
+    const firstPara = doc.paragraphs.find((p) => p.sectionIndex === i);
+    const label = doc.sections.length > 1 ? `Abschnitt ${i + 1}${firstPara ? ` (ab Seite ${firstPara.page})` : ''}` : 'Dokument';
+    for (const [key, name] of SIDES) {
+      const actual = sec.margins[key];
+      const expected = rules.marginsCm[key];
+      if (actual === undefined || expected === null || expected === undefined) continue;
+      const diff = Math.abs(actual - expected);
+      if (diff > TOLERANCE.marginCm) {
+        worst = Math.max(worst, diff);
+        findings.push({ where: label, message: `Rand ${name} ist ${fmt(actual)} cm statt ${fmt(expected)} cm` });
+      }
+    }
+  });
+  const status = findings.length === 0 ? 'ok' : worst <= 0.5 ? 'warn' : 'fail';
+  return {
+    id: 'margins', label: 'Seitenränder', status, findings,
+    summary: findings.length === 0 ? 'Alle Ränder stimmen.' : `${findings.length} Rand-Abweichung${findings.length === 1 ? '' : 'en'}.`,
+  };
+}
+
+// ---------- Umfang ----------
+function checkWordCount(doc, rules) {
+  const { minWords, maxWords } = rules;
+  if (minWords == null && maxWords == null) {
+    return { id: 'words', label: 'Wortzahl', status: 'skip', summary: 'Keine Grenzen gesetzt.', findings: [] };
+  }
+  const n = doc.wordCount;
+  const bad = (minWords != null && n < minWords) ? `Nur ${n} Wörter, mindestens ${minWords} verlangt`
+    : (maxWords != null && n > maxWords) ? `${n} Wörter, höchstens ${maxWords} erlaubt` : null;
+  return {
+    id: 'words', label: 'Wortzahl', status: bad ? 'fail' : 'ok',
+    summary: bad ?? `${n} Wörter, innerhalb der Grenzen.`,
+    findings: bad ? [{ where: 'Dokument', message: bad }] : [],
+  };
+}
+
+function checkPageCount(doc, rules) {
+  const { minPages, maxPages } = rules;
+  if (minPages == null && maxPages == null) {
+    return { id: 'pages', label: 'Seitenzahl', status: 'skip', summary: 'Keine Grenzen gesetzt.', findings: [] };
+  }
+  const n = doc.pages;
+  // Ohne Layout-Engine ist die Seitenzahl nur dann verlässlich, wenn Word sie gespeichert hat.
+  const reliable = doc.pagesSource !== 'explicit';
+  const hint = reliable ? '' : ' (Schätzung, nur harte Umbrüche gezählt; in Word speichern verbessert die Genauigkeit)';
+  const bad = (minPages != null && n < minPages) ? `${n} Seiten, mindestens ${minPages} verlangt`
+    : (maxPages != null && n > maxPages) ? `${n} Seiten, höchstens ${maxPages} erlaubt` : null;
+  return {
+    id: 'pages', label: 'Seitenzahl',
+    status: bad ? (reliable ? 'fail' : 'warn') : 'ok',
+    summary: (bad ?? `${n} Seiten, innerhalb der Grenzen.`) + (bad || !reliable ? hint : ''),
+    findings: bad ? [{ where: 'Dokument', message: bad + hint }] : [],
+  };
+}
+
+// ---------- Hilfen ----------
+const countWords = (t) => t.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
+const where = (p) => `Seite ${p.page}${p.pageSource === 'explicit' ? ' (ca.)' : ''}, «${p.text.trim().slice(0, 40)}${p.text.trim().length > 40 ? '…' : ''}»`;
