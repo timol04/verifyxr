@@ -164,7 +164,15 @@ function checkEntry(entry) {
 
 function render() {
   if (entries.length === 0) return;
-  const checked = entries.map(checkEntry);
+  let checked;
+  try {
+    checked = entries.map(checkEntry);
+  } catch (err) { // Unerwartetes Dokument: Fehler sichtbar machen statt still nichts anzuzeigen
+    console.error(err);
+    $('#result').innerHTML = `<div class="report-head error" role="alert"><h3>Die Prüfung ist fehlgeschlagen</h3><p>${esc(err.message)}</p></div>`;
+    $('#result').hidden = false; $('#placeholder').hidden = true;
+    return;
+  }
   const premium = isPremium();
   const opts = { premium, locks: premiumAvailable() };
   $('#result').innerHTML = checked.length === 1 ? reportHtml(checked[0], opts) : batchHtml(checked, opts);
