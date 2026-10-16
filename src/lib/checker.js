@@ -83,7 +83,8 @@ function checkByRuns({ id, label, okText, doc, rules, probe, perParagraph = fals
       findings.push({ severity: 'error', ...d, where: where(p), words });
     }
   }
-  const share = badWords / total;
+  // Wörter an Run-Grenzen können doppelt gezählt werden: Anteil auf 100 % begrenzen.
+  const share = Math.min(1, badWords / total);
   const status = badWords === 0 ? 'ok' : share <= WARN_SHARE ? 'warn' : 'fail';
   const summary = badWords === 0
     ? okText
@@ -220,5 +221,5 @@ function checkPageCount(doc, rules) {
 }
 
 // ---------- Hilfen ----------
-const countWords = (t) => t.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
-const where = (p) => `Seite ${p.page}${p.pageSource === 'explicit' ? ' (ca.)' : ''}, «${p.text.trim().slice(0, 40)}${p.text.trim().length > 40 ? '…' : ''}»`;
+export const countWords = (t) => t.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
+export const where = (p) => `Seite ${p.page}${p.pageSource === 'explicit' ? ' (ca.)' : ''}, «${p.text.trim().slice(0, 40)}${p.text.trim().length > 40 ? '…' : ''}»`;

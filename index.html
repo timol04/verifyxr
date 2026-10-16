@@ -53,6 +53,8 @@
         </svg>
       </section>
 
+      <section id="premium" class="premium" aria-labelledby="h-premium"></section>
+
       <ol class="steps">
         <!-- Schritt 1 -->
         <li class="step">
@@ -60,6 +62,7 @@
           <form id="rules" autocomplete="off">
             <label class="field">Prüfprofil <select id="preset"></select></label>
             <p id="profileSummary" class="summary-line"></p>
+            <div id="profiles" class="profiles"></div>
             <details class="advanced">
               <summary>Vorgaben anpassen</summary>
               <div class="row3">
@@ -94,12 +97,13 @@
         <li class="step">
           <div class="step-head"><span class="badge">2</span><h2>Dokument hochladen</h2></div>
           <label id="drop" class="drop">
-            <input id="file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+            <input id="file" type="file" multiple accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
             <svg viewBox="0 0 24 24" width="36" height="36" aria-hidden="true"><path d="M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 3v5h5M12 17v-6m-2.5 2.5L12 11l2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <strong>Word-Dokument (.docx) hier ablegen</strong>
             <span>oder klicken, um eine Datei auszuwählen</span>
             <span id="fileName" class="fileName"></span>
           </label>
+          <p id="fileNotice" class="notice" hidden></p>
           <button id="run" class="primary" type="button" disabled>Dokument jetzt prüfen</button>
           <p class="hint">Nach der Prüfung werden geänderte Vorgaben sofort neu angewendet.</p>
         </li>
@@ -107,6 +111,8 @@
         <!-- Schritt 3 -->
         <li class="step" id="step3">
           <div class="step-head"><span class="badge">3</span><h2>Prüfbericht</h2></div>
+          <div id="reportActions" class="actions" hidden></div>
+          <p id="printMeta" class="print-meta"></p>
           <p id="placeholder" class="hint">Das Ergebnis erscheint hier, sobald du ein Dokument geprüft hast.</p>
           <div id="result" hidden></div>
         </li>

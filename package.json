@@ -9,8 +9,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "inspect": "node scripts/inspect-docx.mjs",
-    "make-fixture": "python3 scripts/make-fixture.py",
-    "test": "node --test test/*.test.mjs"
+    "make-fixture": "python3 scripts/make-fixture.py && python3 scripts/make-fixture-apa.py",
+    "test": "node --test test/*.test.mjs",
+    "license": "node scripts/license.mjs"
   },
   "dependencies": {
     "@fontsource-variable/bricolage-grotesque": "^5.3.0",

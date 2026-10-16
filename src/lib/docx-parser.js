@@ -222,7 +222,12 @@ function readRun(r, para, ctx, paraChain) {
     return f['w:ascii'];
   });
   const szHalfPt = Number(firstOf(sources, (src) => attrs(child(src, 'w:sz'))['w:val']));
-  const base = { font, size: Number.isFinite(szHalfPt) ? szHalfPt / 2 : undefined }; // sz: halbe Punkte
+  // <w:i/> ohne Wert (oder val != 0/false/off) bedeutet kursiv; wird wie Schrift/Grösse vererbt.
+  const italic = firstOf(sources, (src) => {
+    const i = child(src, 'w:i');
+    return i ? !['0', 'false', 'off'].includes(attrs(i)['w:val']) : undefined;
+  }) ?? false;
+  const base = { font, size: Number.isFinite(szHalfPt) ? szHalfPt / 2 : undefined, italic }; // sz: halbe Punkte
 
   let buf = '';
   const flush = () => {

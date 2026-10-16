@@ -1,21 +1,17 @@
-// UI: Upload, Vorgaben-Formular, Ergebnis-Darstellung. Alles läuft lokal im Browser.
+// FormaCheck UI: Vorgaben, Upload (einzeln oder Batch), Bericht, Premium-Freischaltung.
+// Alles läuft lokal im Browser, es werden keine Dateien übertragen.
 import './style.css';
 import { parseDocx } from './lib/docx-parser.js';
 import { checkDocument } from './lib/checker.js';
+import { checkApa } from './lib/apa.js';
 import { PRESETS, DEFAULT_PRESET } from './lib/presets.js';
+import { isPremium, activate, deactivate, getStoredKey } from './lib/license.js';
+import { listProfiles, saveProfile, deleteProfile, getProfile } from './lib/profiles.js';
+import { UPGRADE_URL, PRICE_LABEL } from './config.js';
+import { esc, reportHtml, batchHtml, lockedBlock, LOCK_ICON } from './ui/report.js';
 
 const $ = (sel) => document.querySelector(sel);
-const LABEL = { ok: 'Erfüllt', warn: 'Kleine Abweichung', fail: 'Abweichung', skip: 'Nicht geprüft' };
-// Statussymbole als SVG (kein Emoji), Farbe kommt aus CSS (currentColor)
-const GLYPH = {
-  ok: '<circle cx="14" cy="14" r="12" fill="currentColor"/><path d="M8.5 14.5l4 4 7-8" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>',
-  warn: '<path d="M14 2.5l12.5 22h-25z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M14 11v6.5M14 21v.1" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>',
-  fail: '<circle cx="14" cy="14" r="12" fill="currentColor"/><path d="M9.5 9.5l9 9m0-9l-9 9" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>',
-  skip: '<circle cx="14" cy="14" r="11" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 14h10" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
-};
-const glyph = (status) => `<svg class="mark" viewBox="0 0 28 28" aria-hidden="true">${GLYPH[status]}</svg>`;
-const MAX_FINDINGS = 25; // Liste pro Kriterium kürzen, damit lange Arbeiten lesbar bleiben
-const STORAGE_KEY = 'abgabe-checker:rules';
+const RULES_KEY = 'formacheck:rules';
 
 // ---------- Formular <-> Rules ----------
 const num = (id) => {
@@ -46,111 +42,206 @@ function writeRules(r) {
 }
 
 // localStorage kann fehlen oder werfen (privater Modus): immer abfangen.
-const saveRules = () => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(readRules())); } catch { /* egal */ } };
-const loadRules = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch { return null; } };
+const saveRules = () => { try { localStorage.setItem(RULES_KEY, JSON.stringify(readRules())); } catch { /* egal */ } };
+const loadRules = () => { try { return JSON.parse(localStorage.getItem(RULES_KEY)); } catch { return null; } };
 
-// ---------- Rendering ----------
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-
-const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
-const SEVERITY = { error: 'Fehler', hint: 'Hinweis' };
-
-function renderResult(fileName, doc, result) {
-  const { criteria, counts, findingCount } = result;
-  const items = criteria.map((c) => {
-    const shown = c.findings.slice(0, MAX_FINDINGS);
-    const more = c.findings.length - shown.length;
-    const hint = c.findings.find((f) => f.hint)?.hint;
-    const list = shown.length
-      ? `<details${shown.length <= 3 ? ' open' : ''}><summary>${plural(c.findings.length, 'Fundstelle', 'Fundstellen')}</summary>
-         <ul class="findings">${shown.map((f) => `<li class="sev-${f.severity}">
-           <span class="sev">${SEVERITY[f.severity]}</span> <strong>${esc(f.where)}</strong>
-           <span class="vals">Erwartet: ${esc(f.expected ?? '–')} · Gefunden: ${esc(f.found ?? '–')}</span></li>`).join('')}${more > 0 ? `<li class="more">… und ${more} weitere</li>` : ''}</ul>
-         ${hint ? `<p class="fix"><strong>So behebst du es:</strong> ${esc(hint)}</p>` : ''}</details>`
-      : '';
-    return `<li class="item ${c.status}">${glyph(c.status)}
-      <h3>${esc(c.label)}<span class="status">${LABEL[c.status]}</span></h3>
-      <p>${esc(c.summary)}</p>${list}</li>`;
-  }).join('');
-
-  const tile = (cls, n, label) => `<div class="tile ${cls}"><strong>${n}</strong><span>${label}</span></div>`;
-  $('#result').innerHTML = `
-    <div class="report-head" aria-live="polite">
-      <p class="file">${esc(fileName)} · ${doc.wordCount} Wörter · ${doc.pages} Seiten${doc.pagesSource === 'explicit' ? ' (geschätzt)' : ''}</p>
-      <div class="tiles">
-        ${tile('ok', counts.ok, 'Kriterien bestanden')}
-        ${tile('warn', counts.warn, 'Kriterien mit Hinweis')}
-        ${tile('fail', counts.fail, 'Kriterien mit Fehler')}
-      </div>
-      <p class="verdict">${counts.fail + counts.warn === 0 ? 'Alle geprüften Kriterien stimmen mit den Vorgaben überein.' : `${plural(findingCount.error, 'Fehler', 'Fehler')} und ${plural(findingCount.hint, 'Hinweis', 'Hinweise')} an einzelnen Stellen gefunden. Nicht jede Abweichung ist ein Fehler: Hinweise sind unsicher oder knapp.`}</p>
-    </div>
-    <h3 class="cat">Ergebnisse nach Kategorie</h3>
-    <ul class="protocol">${items}</ul>`;
-  $('#result').hidden = false;
-  $('#placeholder').hidden = true;
-  $('#step3').classList.add('done');
-}
-
-function showError(message) {
-  $('#result').innerHTML = `<div class="report-head error" role="alert"><h3>Datei konnte nicht gelesen werden</h3><p>${esc(message)}</p></div>`;
-  $('#result').hidden = false;
-  $('#placeholder').hidden = true;
-}
-
-// Kurzfassung der Vorgaben unter dem Profil
-function updateSummary() {
+/** Kurzfassung der Vorgaben, auch im PDF-Kopf verwendet. */
+function summaryText() {
   const r = readRules();
   const m = r.marginsCm;
   const same = m.top === m.bottom && m.bottom === m.left && m.left === m.right;
-  $('#profileSummary').textContent = `${r.font} · ${r.size} pt · ${r.lineSpacing}-fach · Ränder ${same ? `${m.top} cm` : `${m.top}/${m.bottom}/${m.left}/${m.right} cm`}`;
+  return `${r.font} · ${r.size} pt · ${r.lineSpacing}-fach · Ränder ${same ? `${m.top} cm` : `${m.top}/${m.bottom}/${m.left}/${m.right} cm`}`;
+}
+const updateSummary = () => { $('#profileSummary').textContent = summaryText(); };
+
+// ---------- Profil-Auswahl (Vorlagen + gespeicherte Profile) ----------
+function renderPresetOptions(selected) {
+  const mine = isPremium() ? listProfiles() : [];
+  $('#preset').innerHTML = Object.entries(PRESETS).map(([k, p]) => `<option value="${k}">${esc(p.label)}</option>`).join('')
+    + (mine.length ? `<optgroup label="Meine Profile">${mine.map((p) => `<option value="profile:${esc(p.name)}">${esc(p.name)}</option>`).join('')}</optgroup>` : '')
+    + '<option value="custom">Eigene Vorgaben</option>';
+  $('#preset').value = selected ?? 'custom';
+  if ($('#preset').value !== (selected ?? 'custom')) $('#preset').value = 'custom';
 }
 
-// ---------- Ablauf ----------
-let lastFile = null; // Datei merken, damit Vorgaben-Änderung erneut prüfen kann
+/** Profile speichern/löschen: Premium. Für Gratis-Nutzer eine gesperrte Zeile. */
+function renderProfileTools() {
+  const el = $('#profiles');
+  if (!isPremium()) {
+    el.innerHTML = `<a class="locked-row" href="#premium" data-goto-premium>${LOCK_ICON}<span>Eigene Profile speichern, z.B. «Uni Basel Bachelorarbeit»</span><span class="pill">Premium</span></a>`;
+    return;
+  }
+  const current = $('#preset').value;
+  // Kein <form>: dieser Bereich liegt bereits im Vorgaben-Formular (verschachtelte Formulare sind ungültig).
+  el.innerHTML = `<div class="profile-form">
+      <label class="field">Aktuelle Vorgaben als Profil speichern <input id="profileName" type="text" maxlength="60" placeholder="z.B. Uni Basel Bachelorarbeit" /></label>
+      <button type="button" id="saveProfile" class="secondary">Profil speichern</button>
+      ${current.startsWith('profile:') ? '<button type="button" id="deleteProfile" class="secondary danger">Profil löschen</button>' : ''}
+    </div>`;
+}
 
-async function runCheck() {
-  if (!lastFile) return;
+// ---------- Premium-Bereich ----------
+const FEATURES = ['APA-7-Zitierkonsistenz mit Abgleich zum Literaturverzeichnis', 'Eigene Format-Profile speichern', 'Prüfbericht als PDF speichern', 'Mehrere Dateien auf einmal prüfen'];
+
+function renderPremium(message = '') {
+  const el = $('#premium');
+  if (isPremium()) {
+    const key = getStoredKey();
+    el.innerHTML = `<div class="premium-active">
+      <svg viewBox="0 0 28 28" width="28" height="28" aria-hidden="true"><circle cx="14" cy="14" r="12" fill="currentColor"/><path d="M8.5 14.5l4 4 7-8" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div><h2 id="h-premium">Premium ist aktiv</h2><p>Lizenz ${esc(key.slice(0, 9))}…${esc(key.slice(-4))} auf diesem Gerät gespeichert.</p></div>
+      <button id="removeLicense" class="secondary" type="button">Lizenz entfernen</button></div>`;
+    return;
+  }
+  el.innerHTML = `<h2 id="h-premium">FormaCheck Premium <span class="pill">${esc(PRICE_LABEL)}</span></h2>
+    <ul class="features">${FEATURES.map((f) => `<li>${LOCK_ICON}<span>${esc(f)}</span></li>`).join('')}</ul>
+    <div class="premium-actions">
+      <a class="primary link" href="${esc(UPGRADE_URL)}" target="_blank" rel="noopener">Premium kaufen</a>
+      <form id="licenseForm" class="license-form">
+        <label class="field">Lizenzschlüssel <input id="licenseKey" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="FMCK-XXXX-XXXX-XXXX" /></label>
+        <button type="submit" class="secondary">Freischalten</button>
+      </form>
+    </div>
+    <p id="licenseMsg" class="license-msg" role="status">${esc(message)}</p>
+    <p class="hint">Die Prüfung des Schlüssels läuft lokal im Browser. Es wird nichts übertragen.</p>`;
+}
+
+/** Nach Aktivierung/Deaktivierung alles neu aufbauen, was vom Premium-Status abhängt. */
+function refreshPremiumUi() {
+  renderPremium();
+  renderPresetOptions($('#preset').value);
+  renderProfileTools();
+  // Nach dem Freischalten die zuvor ausgewählten Dateien vollständig prüfen (Batch).
+  if (ignoredFiles > 0 && isPremium()) { handleFiles(selectedFiles); return; }
+  updateFileNotice();
+  render();
+}
+
+// ---------- Dateien und Prüfung ----------
+// entries: [{ name, file, doc?, error? }] – geparst wird einmal, Prüfung läuft bei jeder Vorgaben-Änderung neu.
+let entries = [];
+
+async function parseEntry(file) {
+  const entry = { name: file.name, file };
+  if (!/\.docx$/i.test(file.name)) return { ...entry, error: 'Bitte eine .docx-Datei wählen.' };
   try {
-    const doc = await parseDocx(await lastFile.arrayBuffer());
-    renderResult(lastFile.name, doc, checkDocument(doc, readRules()));
+    entry.doc = await parseDocx(await file.arrayBuffer());
   } catch (err) {
     console.error(err);
-    showError(err.message?.includes('zip') || err.message?.includes('Corrupted')
+    entry.error = /zip|corrupt|end of central/i.test(err.message)
       ? 'Das ist keine gültige .docx-Datei (alte .doc-Dateien bitte in Word als .docx speichern).'
-      : err.message);
+      : err.message;
   }
+  return entry;
 }
 
-function handleFile(file) {
-  if (!file) return;
-  if (!/\.docx$/i.test(file.name)) { showError('Bitte eine .docx-Datei wählen.'); return; }
-  lastFile = file;
-  $('#fileName').textContent = file.name;
+function checkEntry(entry) {
+  if (!entry.doc) return entry;
+  const premium = isPremium();
+  return { ...entry, result: checkDocument(entry.doc, readRules()), apa: premium ? checkApa(entry.doc) : null };
+}
+
+function render() {
+  if (entries.length === 0) return;
+  const checked = entries.map(checkEntry);
+  const premium = isPremium();
+  $('#result').innerHTML = checked.length === 1 ? reportHtml(checked[0], { premium }) : batchHtml(checked, { premium });
+  $('#result').hidden = false;
+  $('#placeholder').hidden = true;
+  $('#step3').classList.add('done');
+  renderActions(checked.some((e) => e.result));
+  $('#printMeta').textContent = `FormaCheck Prüfbericht · ${new Date().toLocaleDateString('de-CH')} · Vorgaben: ${summaryText()}`;
+}
+
+/** PDF-Export (Premium): nutzt den Druckdialog des Browsers, Ziel «Als PDF speichern». */
+function renderActions(hasResult) {
+  const el = $('#reportActions');
+  el.hidden = !hasResult;
+  el.innerHTML = isPremium()
+    ? '<button id="exportPdf" class="secondary" type="button">Als PDF speichern</button><span class="hint">Im Druckdialog «Als PDF speichern» wählen.</span>'
+    : `<a class="locked-row" href="#premium" data-goto-premium>${LOCK_ICON}<span>Prüfbericht als PDF speichern</span><span class="pill">Premium</span></a>`;
+}
+
+let ignoredFiles = 0; // Gratis: weitere ausgewählte Dateien, die nicht geprüft werden
+let selectedFiles = []; // letzte Auswahl, damit nach dem Freischalten alle Dateien geprüft werden können
+
+function updateFileNotice() {
+  const notice = $('#fileNotice');
+  const show = ignoredFiles > 0 && !isPremium();
+  notice.hidden = !show;
+  notice.innerHTML = show ? `${LOCK_ICON}<span>Mehrere Dateien gleichzeitig prüfen ist Premium. Geprüft wird nur «${esc(entries[0].name)}».</span> <a href="#premium" data-goto-premium>Premium ansehen</a>` : '';
+}
+
+async function handleFiles(fileList) {
+  const all = [...fileList];
+  if (all.length === 0) return;
+  selectedFiles = all;
+  // Gratis: nur eine Datei, die übrigen werden mit Hinweis ignoriert.
+  const files = isPremium() ? all : all.slice(0, 1);
+  ignoredFiles = all.length - files.length;
+  entries = await Promise.all(files.map(parseEntry));
+  $('#fileName').textContent = entries.length === 1 ? entries[0].name : `${entries.length} Dateien ausgewählt`;
   $('#run').disabled = false;
-  runCheck().then(() => $('#step3').scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  updateFileNotice();
+  render();
+  $('#step3').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+// ---------- Start ----------
 function init() {
   const select = $('#preset');
-  select.innerHTML = Object.entries(PRESETS).map(([k, p]) => `<option value="${k}">${esc(p.label)}</option>`).join('')
-    + '<option value="custom">Eigene Vorgaben</option>';
   const saved = loadRules();
-  if (saved) { writeRules(saved); select.value = 'custom'; } else { select.value = DEFAULT_PRESET; writeRules({ ...PRESETS[DEFAULT_PRESET].rules, ignoreSpecial: true }); }
-
+  if (saved) { writeRules(saved); renderPresetOptions('custom'); } else { writeRules({ ...PRESETS[DEFAULT_PRESET].rules, ignoreSpecial: true }); renderPresetOptions(DEFAULT_PRESET); }
+  renderPremium();
+  renderProfileTools();
   updateSummary();
-  select.addEventListener('change', () => {
-    if (PRESETS[select.value]) { writeRules({ ...PRESETS[select.value].rules, ignoreSpecial: $('#ignoreSpecial').checked }); saveRules(); updateSummary(); runCheck(); }
-  });
-  $('#rules').addEventListener('input', () => { select.value = 'custom'; saveRules(); updateSummary(); });
-  $('#run').addEventListener('click', () => { runCheck(); $('#step3').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
-  $('#rules').addEventListener('change', runCheck);
-  $('#rules').addEventListener('submit', (e) => e.preventDefault());
 
-  $('#file').addEventListener('change', (e) => handleFile(e.target.files[0]));
+  select.addEventListener('change', () => {
+    const v = select.value;
+    if (PRESETS[v]) writeRules({ ...PRESETS[v].rules, ignoreSpecial: $('#ignoreSpecial').checked });
+    else if (v.startsWith('profile:')) { const p = getProfile(v.slice(8)); if (p) writeRules(p.rules); }
+    saveRules(); updateSummary(); renderProfileTools(); render();
+  });
+  $('#rules').addEventListener('input', (e) => {
+    if (e.target.id === 'profileName') return;
+    renderPresetOptions('custom'); saveRules(); updateSummary();
+  });
+  $('#rules').addEventListener('change', (e) => { if (e.target.id !== 'profileName') render(); });
+  const saveCurrentAsProfile = () => {
+    const name = $('#profileName').value.trim().slice(0, 60);
+    if (saveProfile(name, readRules())) { renderPresetOptions(`profile:${name}`); renderProfileTools(); }
+  };
+  // Enter im Namensfeld speichert das Profil statt das Formular abzuschicken.
+  $('#rules').addEventListener('submit', (e) => { e.preventDefault(); if (document.activeElement?.id === 'profileName') saveCurrentAsProfile(); });
+  $('#rules').addEventListener('click', (e) => {
+    if (e.target.id === 'saveProfile') saveCurrentAsProfile();
+    if (e.target.id === 'deleteProfile' && deleteProfile(select.value.slice(8))) { renderPresetOptions('custom'); renderProfileTools(); }
+  });
+
+  $('#run').addEventListener('click', () => { render(); $('#step3').scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  // Wert zurücksetzen, damit dieselbe Auswahl erneut ein change-Ereignis auslöst.
+  $('#file').addEventListener('change', (e) => { const files = [...e.target.files]; e.target.value = ''; handleFiles(files); });
   const drop = $('#drop');
   ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add('over'); }));
   ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
-  drop.addEventListener('drop', (e) => handleFile(e.dataTransfer.files[0]));
+  drop.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
+
+  // Lizenz eingeben / entfernen (Formular wird neu gerendert, deshalb am Container abfangen)
+  $('#premium').addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (e.target.id !== 'licenseForm') return;
+    if (activate($('#licenseKey').value)) refreshPremiumUi();
+    else renderPremium('Der Schlüssel ist ungültig. Prüfe ihn auf Tippfehler (Format FMCK-XXXX-XXXX-XXXX) oder ob der Browser das Speichern erlaubt.');
+  });
+  $('#premium').addEventListener('click', (e) => { if (e.target.id === 'removeLicense') { deactivate(); refreshPremiumUi(); } });
+
+  // Sprung zum Premium-Bereich aus gesperrten Stellen
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('[data-goto-premium]')) { e.preventDefault(); $('#premium').scrollIntoView({ behavior: 'smooth' }); }
+    if (e.target.id === 'exportPdf') window.print();
+  });
+  // In der Druckansicht müssen aufklappbare Bereiche offen sein.
+  window.addEventListener('beforeprint', () => document.querySelectorAll('#result details').forEach((d) => { d.open = true; }));
 }
 
 init();
